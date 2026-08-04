@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabase";
+import QuickActions from "@/components/dashboard/QuickActions";
+import AppNav from "@/components/dashboard/AppNav";
 
 type CoupleDetails = {
   id: string;
@@ -99,6 +101,7 @@ function calculateSharedStreak(
 export default function DashboardPage() {
   const router = useRouter();
 
+  const [currentUserId, setCurrentUserId] = useState("");
   const [myName, setMyName] = useState("You");
   const [partnerName, setPartnerName] = useState("Your Partner");
   const [couple, setCouple] = useState<CoupleDetails | null>(null);
@@ -131,6 +134,8 @@ export default function DashboardPage() {
       router.replace("/login");
       return;
     }
+
+    setCurrentUserId(user.id);
 
     const currentName =
       user.user_metadata?.display_name ||
@@ -288,6 +293,78 @@ export default function DashboardPage() {
       latestLoveNote.open_on > getToday()
   );
 
+  const checkInsForScore = [myCheckIn, partnerCheckIn].filter(
+    (checkIn): checkIn is CheckIn => Boolean(checkIn)
+  );
+
+  const scoreHappiness = checkInsForScore.length
+    ? checkInsForScore.reduce(
+        (total, checkIn) => total + checkIn.happiness_score,
+        0
+      ) / checkInsForScore.length
+    : 0;
+
+  const scoreConnection = checkInsForScore.length
+    ? checkInsForScore.reduce(
+        (total, checkIn) => total + checkIn.connection_score,
+        0
+      ) / checkInsForScore.length
+    : 0;
+
+  const togetherScore = Math.min(
+    100,
+    Math.round(
+      scoreHappiness * 6 +
+        scoreConnection * 6 +
+        (bothCheckedIn ? 15 : checkInsForScore.length === 1 ? 8 : 0) +
+        Math.min(sharedStreak * 3, 15) +
+        (latestLoveNote ? 10 : 0)
+    )
+  );
+
+  function scoreLabel() {
+    if (togetherScore >= 85) return "Strong day together ❤️";
+    if (togetherScore >= 70) return "Feeling connected 💕";
+    if (togetherScore >= 50) return "Building the day together 🌷";
+    return "A fresh chance to connect 🤍";
+  }
+
+  function personalUpdate() {
+    if (
+      latestLoveNote &&
+      latestLoveNote.recipient_id === currentUserId &&
+      !latestNoteIsLocked
+    ) {
+      return `You have a love note waiting from ${partnerName}.`;
+    }
+
+    if (partnerCheckIn?.mood === "Rough") {
+      return `${partnerName} had a rough check-in today. A little extra care may mean a lot.`;
+    }
+
+    if (partnerCheckIn?.mood === "Distant") {
+      return `${partnerName} is feeling distant today. A gentle check-in could help you reconnect.`;
+    }
+
+    if (bothCheckedIn && scoreConnection >= 4) {
+      return `You both checked in and your connection is feeling strong today.`;
+    }
+
+    if (partnerCheckIn && !myCheckIn) {
+      return `${partnerName} has already checked in today. Your check-in is still waiting.`;
+    }
+
+    if (myCheckIn && !partnerCheckIn) {
+      return `You checked in today. ${partnerName}'s check-in is still waiting.`;
+    }
+
+    if (bothCheckedIn) {
+      return `You both showed up for today's check-in. Keep the conversation going.`;
+    }
+
+    return "Start with a quick check-in and build today's story together.";
+  }
+
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-pink-100 via-rose-50 to-pink-200">
@@ -303,8 +380,10 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-pink-100 via-rose-50 to-pink-200 px-4 py-6 sm:px-6 sm:py-10">
+    <main className="min-h-screen bg-gradient-to-br from-pink-100 via-rose-50 to-pink-200 px-4 pb-28 pt-6 sm:px-6 sm:pb-10 sm:pt-10">
       <div className="mx-auto max-w-6xl">
+        <AppNav />
+
         <header className="mb-8 flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.25em] text-pink-600">
@@ -334,6 +413,61 @@ export default function DashboardPage() {
             {pageError}
           </div>
         )}
+
+        <section className="mb-6 overflow-hidden rounded-[2rem] bg-white shadow-xl">
+          <div className="grid gap-6 bg-gradient-to-r from-pink-600 to-rose-500 p-6 text-white lg:grid-cols-[1.1fr_0.9fr] sm:p-8">
+            <div>
+              <p className="text-sm font-bold uppercase tracking-[0.22em] text-pink-100">
+                Today’s Together Score
+              </p>
+
+              <div className="mt-3 flex items-end gap-3">
+                <span className="text-6xl font-black sm:text-7xl">
+                  {togetherScore}
+                </span>
+                <span className="pb-2 text-2xl font-bold text-pink-100">
+                  /100
+                </span>
+              </div>
+
+              <p className="mt-2 text-xl font-bold">{scoreLabel()}</p>
+
+              <div className="mt-5 h-4 overflow-hidden rounded-full bg-white/25">
+                <div
+                  className="h-full rounded-full bg-white transition-all duration-700"
+                  style={{ width: `${togetherScore}%` }}
+                />
+              </div>
+
+              <p className="mt-3 text-sm text-pink-100">
+                A playful daily snapshot based on check-ins, your streak,
+                and recent love-note activity—not a grade on your relationship.
+              </p>
+            </div>
+
+            <div className="rounded-3xl bg-white/15 p-5 backdrop-blur-sm">
+              <p className="text-sm font-bold uppercase tracking-widest text-pink-100">
+                Personal Update
+              </p>
+              <div className="mt-3 text-4xl">💬</div>
+              <p className="mt-3 text-lg font-semibold leading-relaxed">
+                {personalUpdate()}
+              </p>
+              <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-2xl bg-white/15 p-3">
+                  <p className="text-pink-100">Check-ins</p>
+                  <p className="mt-1 font-bold">
+                    {checkInsForScore.length}/{memberCount}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-white/15 p-3">
+                  <p className="text-pink-100">Shared streak</p>
+                  <p className="mt-1 font-bold">🔥 {sharedStreak} days</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         <section className="mb-6 overflow-hidden rounded-[2rem] bg-white shadow-xl">
           <div className="bg-gradient-to-r from-pink-600 to-rose-500 p-6 text-white sm:p-8">
@@ -548,61 +682,7 @@ export default function DashboardPage() {
           </section>
         </div>
 
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Link
-            href="/checkin"
-            className="rounded-3xl bg-white p-6 shadow-md transition hover:-translate-y-1 hover:shadow-xl"
-          >
-            <span className="text-4xl">😊</span>
-
-            <h2 className="mt-4 text-xl font-bold text-gray-900">
-              Daily Check-In
-            </h2>
-
-            <p className="mt-2 text-sm text-gray-600">
-              Share how today felt.
-            </p>
-          </Link>
-
-          <Link
-            href="/love-jar"
-            className="rounded-3xl bg-white p-6 shadow-md transition hover:-translate-y-1 hover:shadow-xl"
-          >
-            <span className="text-4xl">💌</span>
-
-            <h2 className="mt-4 text-xl font-bold text-gray-900">
-              Love Jar
-            </h2>
-
-            <p className="mt-2 text-sm text-gray-600">
-              Leave {partnerName} something sweet.
-            </p>
-          </Link>
-
-          <div className="rounded-3xl bg-white p-6 shadow-md opacity-80">
-            <span className="text-4xl">📸</span>
-
-            <h2 className="mt-4 text-xl font-bold text-gray-900">
-              Memories
-            </h2>
-
-            <p className="mt-2 text-sm text-gray-600">
-              Coming soon.
-            </p>
-          </div>
-
-          <div className="rounded-3xl bg-white p-6 shadow-md opacity-80">
-            <span className="text-4xl">✨</span>
-
-            <h2 className="mt-4 text-xl font-bold text-gray-900">
-              Wrapped
-            </h2>
-
-            <p className="mt-2 text-sm text-gray-600">
-              Coming soon.
-            </p>
-          </div>
-        </section>
+        <QuickActions partnerName={partnerName} />
       </div>
     </main>
   );

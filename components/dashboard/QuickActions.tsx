@@ -54,7 +54,10 @@ export default function QuickActions({
         </p>
       </Link>
 
-      <div className="rounded-3xl bg-white p-6 shadow-md opacity-80">
+      <Link
+        href="/memories"
+        className="rounded-3xl bg-white p-6 shadow-md transition hover:-translate-y-1 hover:shadow-xl"
+      >
         <span className="text-4xl">📸</span>
 
         <h2 className="mt-4 text-xl font-bold text-gray-900">
@@ -62,9 +65,9 @@ export default function QuickActions({
         </h2>
 
         <p className="mt-2 text-sm text-gray-600">
-          Coming soon.
+          Save your favorite moments together.
         </p>
-      </div>
+      </Link>
     </section>
   );
 }
