@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import Link from "next/link";
@@ -12,6 +11,11 @@ type MemoryRow = {
   user_id: string;
   image_path: string;
   caption: string | null;
+  title: string | null;
+  story: string | null;
+  location: string | null;
+  mood: string | null;
+  is_favorite: boolean;
   memory_date: string;
   created_at: string;
 };
@@ -20,6 +24,15 @@ type Memory = MemoryRow & {
   imageUrl: string;
   uploaderName: string;
 };
+
+const moodOptions = [
+  { label: "Loved", emoji: "🥰" },
+  { label: "Happy", emoji: "😊" },
+  { label: "Fun", emoji: "😂" },
+  { label: "Romantic", emoji: "💕" },
+  { label: "Adventure", emoji: "🌴" },
+  { label: "Peaceful", emoji: "😌" },
+];
 
 function getToday() {
   const now = new Date();
@@ -64,6 +77,10 @@ function safeFileExtension(file: File) {
   return "jpg";
 }
 
+function moodEmoji(mood: string | null) {
+  return moodOptions.find((option) => option.label === mood)?.emoji || "❤️";
+}
+
 export default function MemoriesPage() {
   const router = useRouter();
 
@@ -73,12 +90,18 @@ export default function MemoriesPage() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
+
+  const [title, setTitle] = useState("");
+  const [story, setStory] = useState("");
+  const [location, setLocation] = useState("");
+  const [mood, setMood] = useState("Loved");
   const [caption, setCaption] = useState("");
   const [memoryDate, setMemoryDate] = useState(getToday());
 
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState("");
+  const [favoriteId, setFavoriteId] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -142,9 +165,10 @@ export default function MemoriesPage() {
     const { data: rows, error } = await supabase
       .from("memories")
       .select(
-        "id, couple_id, user_id, image_path, caption, memory_date, created_at"
+        "id, couple_id, user_id, image_path, caption, title, story, location, mood, is_favorite, memory_date, created_at"
       )
       .eq("couple_id", currentCoupleId)
+      .order("is_favorite", { ascending: false })
       .order("memory_date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -246,6 +270,10 @@ export default function MemoriesPage() {
 
     setSelectedFile(null);
     setPreviewUrl("");
+    setTitle("");
+    setStory("");
+    setLocation("");
+    setMood("Loved");
     setCaption("");
     setMemoryDate(getToday());
 
@@ -263,6 +291,11 @@ export default function MemoriesPage() {
 
     if (!selectedFile) {
       setMessage("Choose a photo first.");
+      return;
+    }
+
+    if (!title.trim()) {
+      setMessage("Give this memory a title.");
       return;
     }
 
@@ -302,8 +335,13 @@ export default function MemoriesPage() {
         couple_id: coupleId,
         user_id: userId,
         image_path: imagePath,
+        title: title.trim(),
+        story: story.trim() || null,
+        location: location.trim() || null,
+        mood,
         caption: caption.trim() || null,
         memory_date: memoryDate,
+        is_favorite: false,
       });
 
     if (databaseError) {
@@ -315,10 +353,28 @@ export default function MemoriesPage() {
     }
 
     clearForm();
-    setMessage("Memory added to your timeline ❤️");
+    setMessage("Memory added to your story ❤️");
 
     await loadMemories(coupleId, userId);
     setUploading(false);
+  }
+
+  async function toggleFavorite(memory: Memory) {
+    setFavoriteId(memory.id);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("memories")
+      .update({ is_favorite: !memory.is_favorite })
+      .eq("id", memory.id);
+
+    if (error) {
+      setMessage(error.message);
+    } else {
+      await loadMemories(coupleId, userId);
+    }
+
+    setFavoriteId("");
   }
 
   async function deleteMemory(memory: Memory) {
@@ -374,20 +430,20 @@ export default function MemoriesPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-pink-100 via-rose-50 to-pink-200 px-4 py-8 sm:px-6">
-      <div className="mx-auto max-w-5xl">
+    <main className="min-h-screen px-4 pb-28 pt-8 sm:px-6 sm:pb-12">
+      <div className="mx-auto max-w-5xl animate-soft-fade-up">
         <header className="mb-7 flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-pink-600">
               Together ❤️
             </p>
 
-            <h1 className="mt-2 text-4xl font-bold text-gray-900 sm:text-5xl">
+            <h1 className="mt-2 text-4xl font-black text-gray-900 sm:text-5xl">
               Memories
             </h1>
 
             <p className="mt-2 text-gray-600">
-              Save your favorite moments in one private timeline.
+              Build your private scrapbook, one favorite moment at a time.
             </p>
           </div>
 
@@ -399,16 +455,16 @@ export default function MemoriesPage() {
           </Link>
         </header>
 
-        <section className="mb-7 rounded-[2rem] bg-white p-6 shadow-xl sm:p-8">
+        <section className="glass-card mb-7 rounded-[2rem] p-6 sm:p-8">
           <div className="text-center">
-            <div className="text-6xl">📷</div>
+            <div className="animate-soft-float text-6xl">📷</div>
 
-            <h2 className="mt-4 text-3xl font-bold text-gray-900">
+            <h2 className="mt-4 text-3xl font-black text-gray-900">
               Add a Memory
             </h2>
 
             <p className="mt-2 text-gray-600">
-              Choose a photo, date, and optional caption.
+              Add a title, story, mood, location, and photo.
             </p>
           </div>
 
@@ -422,22 +478,20 @@ export default function MemoriesPage() {
 
             <label
               htmlFor="memory-photo"
-              className="mt-3 flex min-h-44 cursor-pointer items-center justify-center overflow-hidden rounded-3xl border-2 border-dashed border-pink-300 bg-pink-50 text-center transition hover:bg-pink-100"
+              className="mt-3 flex min-h-52 cursor-pointer items-center justify-center overflow-hidden rounded-3xl border-2 border-dashed border-pink-300 bg-pink-50 text-center transition hover:bg-pink-100"
             >
               {previewUrl ? (
                 <img
                   src={previewUrl}
                   alt="Selected memory preview"
-                  className="max-h-96 w-full object-contain"
+                  className="max-h-[520px] w-full object-contain"
                 />
               ) : (
                 <div className="p-8">
                   <div className="text-5xl">🖼️</div>
-
                   <p className="mt-3 font-bold text-pink-700">
                     Tap to choose a photo
                   </p>
-
                   <p className="mt-1 text-sm text-gray-500">
                     JPG, PNG, or WebP · Maximum 10 MB
                   </p>
@@ -454,47 +508,101 @@ export default function MemoriesPage() {
             />
           </div>
 
-          <div className="mt-5 grid gap-5 sm:grid-cols-2">
+          <div className="mt-6 grid gap-5 sm:grid-cols-2">
             <div>
-              <label
-                htmlFor="memory-date"
-                className="font-bold text-gray-900"
-              >
-                Memory date
+              <label htmlFor="memory-title" className="font-bold text-gray-900">
+                Title
               </label>
+              <input
+                id="memory-title"
+                type="text"
+                value={title}
+                maxLength={100}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Kimberly's Palm Springs Birthday"
+                className="mt-3 w-full rounded-2xl border border-pink-200 bg-white px-4 py-3 text-gray-900 outline-none"
+              />
+            </div>
 
+            <div>
+              <label htmlFor="memory-date" className="font-bold text-gray-900">
+                Date
+              </label>
               <input
                 id="memory-date"
                 type="date"
                 value={memoryDate}
                 max={getToday()}
                 onChange={(event) => setMemoryDate(event.target.value)}
-                className="mt-3 w-full rounded-2xl border border-pink-200 px-4 py-3 text-gray-900 outline-none focus:border-pink-500"
+                className="mt-3 w-full rounded-2xl border border-pink-200 bg-white px-4 py-3 text-gray-900 outline-none"
               />
             </div>
 
             <div>
-              <label
-                htmlFor="memory-caption"
-                className="font-bold text-gray-900"
-              >
-                Caption
+              <label htmlFor="memory-location" className="font-bold text-gray-900">
+                Location
               </label>
-
               <input
-                id="memory-caption"
+                id="memory-location"
                 type="text"
-                value={caption}
-                maxLength={300}
-                onChange={(event) => setCaption(event.target.value)}
-                placeholder="Palm Springs birthday dinner ❤️"
-                className="mt-3 w-full rounded-2xl border border-pink-200 px-4 py-3 text-gray-900 outline-none focus:border-pink-500"
+                value={location}
+                maxLength={150}
+                onChange={(event) => setLocation(event.target.value)}
+                placeholder="Palm Springs, California"
+                className="mt-3 w-full rounded-2xl border border-pink-200 bg-white px-4 py-3 text-gray-900 outline-none"
               />
-
-              <p className="mt-1 text-right text-xs text-gray-500">
-                {caption.length}/300
-              </p>
             </div>
+
+            <div>
+              <label htmlFor="memory-mood" className="font-bold text-gray-900">
+                Mood
+              </label>
+              <select
+                id="memory-mood"
+                value={mood}
+                onChange={(event) => setMood(event.target.value)}
+                className="mt-3 w-full rounded-2xl border border-pink-200 bg-white px-4 py-3 text-gray-900 outline-none"
+              >
+                {moodOptions.map((option) => (
+                  <option key={option.label} value={option.label}>
+                    {option.emoji} {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <label htmlFor="memory-caption" className="font-bold text-gray-900">
+              Short caption
+            </label>
+            <input
+              id="memory-caption"
+              type="text"
+              value={caption}
+              maxLength={300}
+              onChange={(event) => setCaption(event.target.value)}
+              placeholder="The best birthday weekend ❤️"
+              className="mt-3 w-full rounded-2xl border border-pink-200 bg-white px-4 py-3 text-gray-900 outline-none"
+            />
+          </div>
+
+          <div className="mt-5">
+            <label htmlFor="memory-story" className="font-bold text-gray-900">
+              Tell the story
+            </label>
+            <textarea
+              id="memory-story"
+              value={story}
+              maxLength={2000}
+              rows={5}
+              onChange={(event) => setStory(event.target.value)}
+              placeholder="What made this day special?"
+              className="mt-3 w-full resize-none rounded-2xl border border-pink-200 bg-white px-4 py-3 text-gray-900 outline-none"
+            />
+            <p className="mt-1 text-right text-xs text-gray-500">
+              {story.length}/2000
+            </p>
           </div>
 
           <button
@@ -503,7 +611,7 @@ export default function MemoriesPage() {
             disabled={uploading || !selectedFile || !coupleId}
             className="mt-7 w-full rounded-full bg-pink-600 px-6 py-4 text-lg font-bold text-white shadow-md transition hover:bg-pink-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {uploading ? "Saving Memory..." : "Add to Our Memories"}
+            {uploading ? "Saving Memory..." : "Add to Our Story"}
           </button>
 
           {selectedFile && (
@@ -511,9 +619,9 @@ export default function MemoriesPage() {
               type="button"
               onClick={clearForm}
               disabled={uploading}
-              className="mt-3 w-full rounded-full border border-pink-200 px-6 py-3 font-semibold text-pink-700 disabled:opacity-50"
+              className="mt-3 w-full rounded-full border border-pink-200 bg-white px-6 py-3 font-semibold text-pink-700 disabled:opacity-50"
             >
-              Clear Photo
+              Clear Form
             </button>
           )}
 
@@ -524,35 +632,30 @@ export default function MemoriesPage() {
           )}
         </section>
 
-        <section className="rounded-[2rem] bg-white p-6 shadow-xl sm:p-8">
+        <section className="glass-card rounded-[2rem] p-6 sm:p-8">
           <div className="flex items-end justify-between gap-4">
             <div>
               <p className="text-sm font-bold uppercase tracking-widest text-pink-600">
                 Your Story
               </p>
-
-              <h2 className="mt-2 text-3xl font-bold text-gray-900">
+              <h2 className="mt-2 text-3xl font-black text-gray-900">
                 Shared Timeline
               </h2>
             </div>
 
             <span className="rounded-full bg-pink-100 px-4 py-2 text-sm font-bold text-pink-700">
-              {memories.length}{" "}
-              {memories.length === 1 ? "memory" : "memories"}
+              {memories.length} {memories.length === 1 ? "memory" : "memories"}
             </span>
           </div>
 
           {memories.length === 0 ? (
             <div className="py-14 text-center">
               <div className="text-6xl">💕</div>
-
               <h3 className="mt-4 text-2xl font-bold text-gray-900">
                 Your timeline is ready
               </h3>
-
               <p className="mx-auto mt-2 max-w-md text-gray-600">
-                Add your first photo to begin building your story
-                together.
+                Add your first photo and story to begin.
               </p>
             </div>
           ) : (
@@ -564,18 +667,13 @@ export default function MemoriesPage() {
                 >
                   <span className="absolute -left-[11px] top-0 h-[18px] w-[18px] rounded-full border-4 border-white bg-pink-600 shadow" />
 
-                  <div className="overflow-hidden rounded-3xl border border-pink-100 bg-pink-50 shadow-md">
+                  <div className="app-card overflow-hidden rounded-3xl">
                     {memory.imageUrl ? (
                       <img
                         src={memory.imageUrl}
-                        alt={
-                          memory.caption ||
-                          `Memory from ${formatMemoryDate(
-                            memory.memory_date
-                          )}`
-                        }
+                        alt={memory.title || memory.caption || "Shared memory"}
                         loading={index < 2 ? "eager" : "lazy"}
-                        className="max-h-[650px] w-full bg-black/5 object-contain"
+                        className="max-h-[700px] w-full bg-black/5 object-contain"
                       />
                     ) : (
                       <div className="flex h-64 items-center justify-center bg-pink-100 text-5xl">
@@ -583,37 +681,82 @@ export default function MemoriesPage() {
                       </div>
                     )}
 
-                    <div className="p-5 sm:p-6">
+                    <div className="p-5 sm:p-7">
                       <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="text-sm font-bold uppercase tracking-widest text-pink-600">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full bg-pink-100 px-3 py-1 text-sm font-bold text-pink-700">
+                              {moodEmoji(memory.mood)} {memory.mood || "Memory"}
+                            </span>
+
+                            {memory.is_favorite && (
+                              <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-800">
+                                ⭐ Favorite
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="mt-4 text-sm font-bold uppercase tracking-widest text-pink-600">
                             {formatMemoryDate(memory.memory_date)}
                           </p>
 
-                          {memory.caption && (
-                            <p className="mt-3 whitespace-pre-wrap text-lg text-gray-800">
+                          <h3 className="mt-2 text-3xl font-black text-gray-900">
+                            {memory.title || memory.caption || "A Special Memory"}
+                          </h3>
+
+                          {memory.location && (
+                            <p className="mt-2 font-semibold text-gray-600">
+                              📍 {memory.location}
+                            </p>
+                          )}
+
+                          {memory.caption && memory.title && (
+                            <p className="mt-4 text-lg font-semibold text-gray-700">
                               {memory.caption}
                             </p>
                           )}
 
-                          <p className="mt-3 text-sm text-gray-500">
+                          {memory.story && (
+                            <div className="mt-5 rounded-2xl bg-pink-50 p-5">
+                              <p className="whitespace-pre-wrap leading-relaxed text-gray-800">
+                                {memory.story}
+                              </p>
+                            </div>
+                          )}
+
+                          <p className="mt-4 text-sm text-gray-500">
                             Added by {memory.uploaderName} ·{" "}
                             {formatCreatedAt(memory.created_at)}
                           </p>
                         </div>
 
-                        {memory.user_id === userId && (
+                        <div className="flex shrink-0 flex-col gap-2">
                           <button
                             type="button"
-                            onClick={() => deleteMemory(memory)}
-                            disabled={deletingId === memory.id}
-                            className="shrink-0 rounded-full border border-pink-200 bg-white px-3 py-2 text-sm font-semibold text-pink-700 disabled:opacity-50"
+                            onClick={() => toggleFavorite(memory)}
+                            disabled={favoriteId === memory.id}
+                            className="rounded-full border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-700 disabled:opacity-50"
                           >
-                            {deletingId === memory.id
-                              ? "Deleting..."
-                              : "Delete"}
+                            {favoriteId === memory.id
+                              ? "Saving..."
+                              : memory.is_favorite
+                                ? "Unfavorite"
+                                : "Favorite"}
                           </button>
-                        )}
+
+                          {memory.user_id === userId && (
+                            <button
+                              type="button"
+                              onClick={() => deleteMemory(memory)}
+                              disabled={deletingId === memory.id}
+                              className="rounded-full border border-pink-200 bg-white px-3 py-2 text-sm font-semibold text-pink-700 disabled:opacity-50"
+                            >
+                              {deletingId === memory.id
+                                ? "Deleting..."
+                                : "Delete"}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
