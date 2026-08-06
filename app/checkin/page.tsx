@@ -40,6 +40,7 @@ export default function CheckInPage() {
 
   const [userId, setUserId] = useState("");
   const [coupleId, setCoupleId] = useState("");
+  const [partnerId, setPartnerId] = useState("");
   const [mood, setMood] = useState("");
   const [happinessScore, setHappinessScore] = useState(4);
   const [connectionScore, setConnectionScore] = useState(4);
@@ -80,6 +81,19 @@ export default function CheckInPage() {
     }
 
     setCoupleId(membership.couple_id);
+
+    const { data: members } = await supabase
+      .from("couple_members")
+      .select("user_id")
+      .eq("couple_id", membership.couple_id);
+
+    const partner = members?.find(
+      (member) => member.user_id !== user.id
+    );
+
+    if (partner) {
+      setPartnerId(partner.user_id);
+    }
 
     const { data: existingCheckIn } = await supabase
       .from("daily_checkins")
@@ -126,11 +140,22 @@ export default function CheckInPage() {
 
     setSaving(true);
 
+    const today = getToday();
+
+    const { data: existingRow } = await supabase
+      .from("daily_checkins")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("checkin_date", today)
+      .maybeSingle();
+
+    const isFirstCheckInToday = !existingRow;
+
     const { error } = await supabase.from("daily_checkins").upsert(
       {
         couple_id: coupleId,
         user_id: userId,
-        checkin_date: getToday(),
+        checkin_date: today,
         mood,
         happiness_score: happinessScore,
         connection_score: connectionScore,
@@ -146,9 +171,36 @@ export default function CheckInPage() {
 
     if (error) {
       setMessage(error.message);
-    } else {
-      setMessage("Today’s check-in was saved ❤️");
+      setSaving(false);
+      return;
     }
+
+    if (isFirstCheckInToday && partnerId) {
+      const { error: notificationError } = await supabase
+        .from("notifications")
+        .insert({
+          couple_id: coupleId,
+          recipient_id: partnerId,
+          actor_id: userId,
+          notification_type: "checkin",
+          title: "Your partner completed today’s check-in",
+          message: `Mood: ${mood} · Happiness ${happinessScore}/5 · Connection ${connectionScore}/5`,
+          link: "/checkin-history",
+        });
+
+      if (notificationError) {
+        console.error(
+          "Check-in saved, but notification could not be created:",
+          notificationError.message
+        );
+      }
+    }
+
+    setMessage(
+      isFirstCheckInToday
+        ? "Today’s check-in was saved ❤️"
+        : "Today’s check-in was updated ❤️"
+    );
 
     setSaving(false);
   }

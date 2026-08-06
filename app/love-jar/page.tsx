@@ -176,25 +176,55 @@ export default function LoveJarPage() {
 
     setSending(true);
 
-    const { error } = await supabase.from("love_jar_notes").insert({
-      couple_id: coupleId,
-      sender_id: userId,
-      recipient_id: partnerId,
-      message: message.trim(),
-      category,
-      open_on: openOn || null,
-    });
+    const noteMessage = message.trim();
+
+    const { data: newNote, error } = await supabase
+      .from("love_jar_notes")
+      .insert({
+        couple_id: coupleId,
+        sender_id: userId,
+        recipient_id: partnerId,
+        message: noteMessage,
+        category,
+        open_on: openOn || null,
+      })
+      .select("id")
+      .single();
 
     if (error) {
       setStatus(error.message);
-    } else {
-      setMessage("");
-      setCategory("Love Note");
-      setOpenOn("");
-      setStatus("Your note was added to Kimberly’s Love Jar ❤️");
-      await loadNotes(userId, coupleId);
+      setSending(false);
+      return;
     }
 
+    const notificationMessage = openOn
+      ? `${category} · Locked until ${formatDate(openOn)}`
+      : `${category} · Ready to open now`;
+
+    const { error: notificationError } = await supabase
+      .from("notifications")
+      .insert({
+        couple_id: coupleId,
+        recipient_id: partnerId,
+        actor_id: userId,
+        notification_type: "love_note",
+        title: "Your partner left you a Love Note",
+        message: notificationMessage,
+        link: "/love-jar",
+      });
+
+    if (notificationError) {
+      console.error(
+        `Love note ${newNote.id} was saved, but its notification failed:`,
+        notificationError.message
+      );
+    }
+
+    setMessage("");
+    setCategory("Love Note");
+    setOpenOn("");
+    setStatus("Your note was added to Kimberly’s Love Jar ❤️");
+    await loadNotes(userId, coupleId);
     setSending(false);
   }
 

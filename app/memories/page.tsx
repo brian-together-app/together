@@ -25,6 +25,20 @@ type Memory = MemoryRow & {
   uploaderName: string;
 };
 
+type MemoryCommentRow = {
+  id: string;
+  memory_id: string;
+  couple_id: string;
+  user_id: string;
+  message: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type MemoryComment = MemoryCommentRow & {
+  authorName: string;
+};
+
 const moodOptions = [
   { label: "Loved", emoji: "🥰" },
   { label: "Happy", emoji: "😊" },
@@ -53,10 +67,34 @@ function formatMemoryDate(date: string) {
 }
 
 function formatCreatedAt(date: string) {
-  return new Date(date).toLocaleDateString(undefined, {
+  return new Date(date).toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatCommentTime(date: string) {
+  const value = new Date(date);
+  const now = new Date();
+  const difference = now.getTime() - value.getTime();
+  const minutes = Math.floor(difference / 60000);
+  const hours = Math.floor(difference / 3600000);
+  const days = Math.floor(difference / 86400000);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (hours < 24) return `${hours} hr${hours === 1 ? "" : "s"} ago`;
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+
+  return value.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: value.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 
@@ -86,8 +124,13 @@ export default function MemoriesPage() {
 
   const [userId, setUserId] = useState("");
   const [coupleId, setCoupleId] = useState("");
+  const [partnerId, setPartnerId] = useState("");
 
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [commentsByMemory, setCommentsByMemory] = useState<
+    Record<string, MemoryComment[]>
+  >({});
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
 
@@ -102,6 +145,8 @@ export default function MemoriesPage() {
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState("");
   const [favoriteId, setFavoriteId] = useState("");
+  const [sendingCommentId, setSendingCommentId] = useState("");
+  const [deletingCommentId, setDeletingCommentId] = useState("");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -153,6 +198,19 @@ export default function MemoriesPage() {
     }
 
     setCoupleId(membership.couple_id);
+
+    const { data: members } = await supabase
+      .from("couple_members")
+      .select("user_id")
+      .eq("couple_id", membership.couple_id);
+
+    const partner = members?.find(
+      (member) => member.user_id !== user.id
+    );
+
+    if (partner) {
+      setPartnerId(partner.user_id);
+    }
 
     await loadMemories(membership.couple_id, user.id);
     setLoading(false);
@@ -232,6 +290,71 @@ export default function MemoriesPage() {
     }));
 
     setMemories(completedMemories);
+    await loadComments(
+      completedMemories.map((memory) => memory.id),
+      currentUserId
+    );
+  }
+
+  async function loadComments(
+    memoryIds: string[],
+    currentUserId: string
+  ) {
+    if (memoryIds.length === 0) {
+      setCommentsByMemory({});
+      return;
+    }
+
+    const { data: rows, error } = await supabase
+      .from("memory_comments")
+      .select(
+        "id, memory_id, couple_id, user_id, message, created_at, updated_at"
+      )
+      .in("memory_id", memoryIds)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    const commentRows = (rows || []) as MemoryCommentRow[];
+    const userIds = [...new Set(commentRows.map((comment) => comment.user_id))];
+
+    const { data: profiles } =
+      userIds.length > 0
+        ? await supabase
+            .from("profiles")
+            .select("id, display_name")
+            .in("id", userIds)
+        : { data: [] as { id: string; display_name: string | null }[] };
+
+    const names = new Map<string, string>();
+
+    for (const profile of profiles || []) {
+      names.set(
+        profile.id,
+        profile.display_name?.trim() || "Your Partner"
+      );
+    }
+
+    const grouped: Record<string, MemoryComment[]> = {};
+
+    for (const comment of commentRows) {
+      if (!grouped[comment.memory_id]) {
+        grouped[comment.memory_id] = [];
+      }
+
+      grouped[comment.memory_id].push({
+        ...comment,
+        authorName:
+          comment.user_id === currentUserId
+            ? "You"
+            : names.get(comment.user_id) || "Your Partner",
+      });
+    }
+
+    setCommentsByMemory(grouped);
   }
 
   function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
@@ -413,6 +536,113 @@ export default function MemoriesPage() {
 
     await loadMemories(coupleId, userId);
     setDeletingId("");
+  }
+
+  async function addComment(memory: Memory) {
+    const commentMessage = (commentDrafts[memory.id] || "").trim();
+
+    if (!commentMessage) {
+      setMessage("Write a comment first.");
+      return;
+    }
+
+    if (!userId || !coupleId) {
+      setMessage("Your relationship space could not be found.");
+      return;
+    }
+
+    setSendingCommentId(memory.id);
+    setMessage("");
+
+    const { data: newComment, error } = await supabase
+      .from("memory_comments")
+      .insert({
+        memory_id: memory.id,
+        couple_id: coupleId,
+        user_id: userId,
+        message: commentMessage,
+      })
+      .select(
+        "id, memory_id, couple_id, user_id, message, created_at, updated_at"
+      )
+      .single();
+
+    if (error) {
+      setMessage(error.message);
+      setSendingCommentId("");
+      return;
+    }
+
+    const comment: MemoryComment = {
+      ...(newComment as MemoryCommentRow),
+      authorName: "You",
+    };
+
+    setCommentsByMemory((current) => ({
+      ...current,
+      [memory.id]: [...(current[memory.id] || []), comment],
+    }));
+
+    setCommentDrafts((current) => ({
+      ...current,
+      [memory.id]: "",
+    }));
+
+    if (partnerId) {
+      const memoryTitle =
+        memory.title || memory.caption || "a shared memory";
+
+      const { error: notificationError } = await supabase
+        .from("notifications")
+        .insert({
+          couple_id: coupleId,
+          recipient_id: partnerId,
+          actor_id: userId,
+          notification_type: "memory_comment",
+          title: "Your partner commented on a memory",
+          message: `${memoryTitle}: “${commentMessage.slice(0, 120)}”`,
+          link: "/memories",
+        });
+
+      if (notificationError) {
+        console.error(
+          "Comment saved, but notification could not be created:",
+          notificationError.message
+        );
+      }
+    }
+
+    setSendingCommentId("");
+  }
+
+  async function deleteComment(comment: MemoryComment) {
+    const confirmed = window.confirm("Delete this comment?");
+
+    if (!confirmed) return;
+
+    setDeletingCommentId(comment.id);
+    setMessage("");
+
+    const { error } = await supabase
+      .from("memory_comments")
+      .delete()
+      .eq("id", comment.id)
+      .eq("user_id", userId);
+
+    if (error) {
+      setMessage(error.message);
+      setDeletingCommentId("");
+      return;
+    }
+
+    setCommentsByMemory((current) => ({
+      ...current,
+      [comment.memory_id]: (current[comment.memory_id] || []).filter(
+        (item) => item.id !== comment.id
+      ),
+    }));
+
+    setDeletingCommentId("");
   }
 
   if (loading) {
@@ -756,6 +986,106 @@ export default function MemoriesPage() {
                                 : "Delete"}
                             </button>
                           )}
+                        </div>
+                      </div>
+
+                      <div className="mt-7 border-t border-pink-100 pt-6">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold uppercase tracking-widest text-pink-600">
+                              Comments
+                            </p>
+                            <h4 className="mt-1 text-xl font-black text-gray-900">
+                              {(commentsByMemory[memory.id] || []).length}{" "}
+                              {(commentsByMemory[memory.id] || []).length === 1
+                                ? "comment"
+                                : "comments"}
+                            </h4>
+                          </div>
+
+                          <span className="text-3xl">💬</span>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                          {(commentsByMemory[memory.id] || []).length === 0 ? (
+                            <div className="rounded-2xl bg-pink-50 p-4 text-center text-sm font-semibold text-gray-600">
+                              Start the conversation about this memory.
+                            </div>
+                          ) : (
+                            (commentsByMemory[memory.id] || []).map(
+                              (comment) => (
+                                <div
+                                  key={comment.id}
+                                  className="rounded-2xl bg-pink-50 p-4"
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="font-black text-gray-900">
+                                        {comment.authorName}
+                                      </p>
+                                      <p className="mt-1 whitespace-pre-wrap text-gray-800">
+                                        {comment.message}
+                                      </p>
+                                      <p className="mt-2 text-xs font-semibold text-gray-500">
+                                        {formatCommentTime(comment.created_at)}
+                                      </p>
+                                    </div>
+
+                                    {comment.user_id === userId && (
+                                      <button
+                                        type="button"
+                                        onClick={() => deleteComment(comment)}
+                                        disabled={
+                                          deletingCommentId === comment.id
+                                        }
+                                        className="shrink-0 rounded-full border border-pink-200 bg-white px-3 py-2 text-xs font-bold text-pink-700 disabled:opacity-50"
+                                      >
+                                        {deletingCommentId === comment.id
+                                          ? "Deleting..."
+                                          : "Delete"}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            )
+                          )}
+                        </div>
+
+                        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                          <input
+                            type="text"
+                            value={commentDrafts[memory.id] || ""}
+                            maxLength={1000}
+                            onChange={(event) =>
+                              setCommentDrafts((current) => ({
+                                ...current,
+                                [memory.id]: event.target.value,
+                              }))
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                addComment(memory);
+                              }
+                            }}
+                            placeholder="Write a comment..."
+                            className="min-w-0 flex-1 rounded-2xl border border-pink-200 bg-white px-4 py-3 text-gray-900 outline-none"
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => addComment(memory)}
+                            disabled={
+                              sendingCommentId === memory.id ||
+                              !(commentDrafts[memory.id] || "").trim()
+                            }
+                            className="rounded-full bg-pink-600 px-5 py-3 font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {sendingCommentId === memory.id
+                              ? "Posting..."
+                              : "Comment"}
+                          </button>
                         </div>
                       </div>
                     </div>
