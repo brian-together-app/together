@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabase";
 import QuickActions from "@/components/dashboard/QuickActions";
-import AppNav from "@/components/dashboard/AppNav";
 
 type CoupleDetails = {
   id: string;
@@ -29,6 +28,16 @@ type LoveNote = {
   message: string;
   open_on: string | null;
   opened_at: string | null;
+  created_at: string;
+};
+
+type NotificationItem = {
+  id: string;
+  notification_type: string;
+  title: string;
+  message: string | null;
+  link: string | null;
+  is_read: boolean;
   created_at: string;
 };
 
@@ -61,6 +70,37 @@ function formatDate(date: string) {
     month: "short",
     day: "numeric",
   });
+}
+
+function formatRelativeTime(date: string) {
+  const value = new Date(date);
+  const now = new Date();
+  const difference = now.getTime() - value.getTime();
+
+  const minutes = Math.floor(difference / 60000);
+  const hours = Math.floor(difference / 3600000);
+  const days = Math.floor(difference / 86400000);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (hours < 24) return `${hours} hr${hours === 1 ? "" : "s"} ago`;
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+
+  return value.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function notificationIcon(type: string) {
+  if (type === "love_note") return "💌";
+  if (type === "memory") return "📸";
+  if (type === "memory_comment") return "💬";
+  if (type === "checkin") return "😊";
+  if (type === "streak") return "🔥";
+  return "🔔";
 }
 
 function calculateSharedStreak(
@@ -114,6 +154,11 @@ export default function DashboardPage() {
   const [sharedStreak, setSharedStreak] = useState(0);
   const [latestLoveNote, setLatestLoveNote] =
     useState<LoveNote | null>(null);
+
+  const [recentNotifications, setRecentNotifications] = useState<
+    NotificationItem[]
+  >([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
@@ -254,6 +299,35 @@ export default function DashboardPage() {
       .maybeSingle();
 
     setLatestLoveNote(latestNote || null);
+
+    const { data: notificationRows, error: notificationError } = await supabase
+      .from("notifications")
+      .select(
+        "id, notification_type, title, message, link, is_read, created_at"
+      )
+      .eq("recipient_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(3);
+
+    if (!notificationError) {
+      setRecentNotifications(
+        (notificationRows || []) as NotificationItem[]
+      );
+    }
+
+    const { count: unreadCount, error: unreadError } = await supabase
+      .from("notifications")
+      .select("id", {
+        count: "exact",
+        head: true,
+      })
+      .eq("recipient_id", user.id)
+      .eq("is_read", false);
+
+    if (!unreadError) {
+      setUnreadNotificationCount(unreadCount || 0);
+    }
+
     setLoading(false);
   }
 
@@ -382,8 +456,6 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-pink-100 via-rose-50 to-pink-200 px-4 pb-28 pt-6 sm:px-6 sm:pb-10 sm:pt-10">
       <div className="mx-auto max-w-6xl">
-        <AppNav />
-
         <header className="mb-8 flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.25em] text-pink-600">
@@ -413,6 +485,94 @@ export default function DashboardPage() {
             {pageError}
           </div>
         )}
+
+        <section className="mb-6 overflow-hidden rounded-[2rem] border border-pink-100 bg-white shadow-xl">
+          <div className="p-6 sm:p-8">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-3">
+                  <span className="text-4xl">🔔</span>
+
+                  <div>
+                    <p className="text-sm font-bold uppercase tracking-[0.2em] text-pink-600">
+                      New Updates
+                    </p>
+
+                    <h2 className="mt-1 text-2xl font-black text-gray-900 sm:text-3xl">
+                      {unreadNotificationCount > 0
+                        ? `You have ${unreadNotificationCount} new ${
+                            unreadNotificationCount === 1
+                              ? "update"
+                              : "updates"
+                          }`
+                        : "You’re all caught up"}
+                    </h2>
+                  </div>
+                </div>
+
+                <p className="mt-3 text-gray-600">
+                  Love notes, comments, memories, and check-ins appear here
+                  when you log in.
+                </p>
+              </div>
+
+              <Link
+                href="/notifications"
+                className="rounded-full bg-pink-600 px-5 py-3 text-center text-sm font-bold text-white shadow-md transition hover:bg-pink-700"
+              >
+                View All Updates
+              </Link>
+            </div>
+
+            {recentNotifications.length > 0 ? (
+              <div className="mt-6 grid gap-3">
+                {recentNotifications.map((notification) => (
+                  <Link
+                    key={notification.id}
+                    href={notification.link || "/notifications"}
+                    className={`flex items-start gap-4 rounded-3xl border p-4 transition hover:-translate-y-0.5 hover:shadow-md ${
+                      notification.is_read
+                        ? "border-pink-100 bg-white"
+                        : "border-pink-300 bg-pink-50"
+                    }`}
+                  >
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-2xl shadow-sm">
+                      {notificationIcon(notification.notification_type)}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-black text-gray-900">
+                          {notification.title}
+                        </h3>
+
+                        {!notification.is_read && (
+                          <span className="h-2.5 w-2.5 rounded-full bg-pink-600" />
+                        )}
+                      </div>
+
+                      {notification.message && (
+                        <p className="mt-1 line-clamp-2 text-sm text-gray-700">
+                          {notification.message}
+                        </p>
+                      )}
+
+                      <p className="mt-2 text-xs font-semibold text-gray-500">
+                        {formatRelativeTime(notification.created_at)}
+                      </p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-6 rounded-3xl bg-pink-50 p-5 text-center">
+                <p className="font-semibold text-gray-700">
+                  Nothing new since your last visit ❤️
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
 
         <section className="mb-6 overflow-hidden rounded-[2rem] bg-white shadow-xl">
           <div className="grid gap-6 bg-gradient-to-r from-pink-600 to-rose-500 p-6 text-white lg:grid-cols-[1.1fr_0.9fr] sm:p-8">
